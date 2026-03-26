@@ -172,3 +172,4 @@ outputs/
 *.err
 *.tar
 *.tar.bz2
+ps2slurm_*.txt
