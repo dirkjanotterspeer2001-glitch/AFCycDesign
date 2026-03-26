@@ -1,1 +1,0 @@
-python /home/s2528436/prosculpt_afcycdesign/rfdiff_mpnn_afcycdesign_merged.py ++output_dir=Examples/Examples_out/2WUH/01 -cd '/zfsstore/user/s2528436/prosculpt_afcycdesign/Examples' -cn '2WUH'
