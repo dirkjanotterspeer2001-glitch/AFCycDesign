@@ -1,0 +1,40 @@
+# Config for the current run
+pdb_path: null # Path to input PDB file || null when building unconditionally
+output_dir: /home/s2528436/prosculpt_afcycdesign/output/ # Path to output directory
+contig: "[A1-20]" # Contig to design, needs to be a cyclic peptide
+num_designs_rfdiff: 2 # Number of designs to generate with RFdiffusion
+num_seq_per_target_mpnn: 2 # Number of sequences to generate per target with MPNN
+chains_to_design: null # All chains of protein even if not redesigned (except if doing binder design)
+afcycdesign_mpnn_cycles: 1 
+num_models: 5 # number of independent predicted structures based on one amino acid sequence
+max_recycles: 3 # number of iteration steps in optimalization for each model
+chain_break_cutoff_A: 2 # Chain break cutoff in angstroms (default: 2)
+
+skipRfDiff: False # Whether to skip RfDiff and only redesign a few residues with ProteinMPNN and AF
+designable_residues: [A8, A9, A10, A13, A85, B, C] # Residues to be redesigned when skipRfDiff == True. Also add letters of all other chains in the PDB you wish to have in the end structure.
+
+defaults:
+  - installation
+  - _self_
+
+pass_to_rfdiff: # Groups to pass to RfDiff
+- inference
+- potentials
+
+
+# Symmetry to sample
+# Available symmetries:
+# - Cyclic symmetry (C_n) # call as c5
+# - Dihedral symmetry (D_n) # call as d5
+# - Tetrahedral symmetry # call as tetrahedral
+# - Octahedral symmetry # call as octahedral
+# - Icosahedral symmetry # call as icosahedral
+
+
+inference:
+# symmetry: c2
+  generatedWithProsculpt: true # Leave this dummy here, otherwise it will overwrite default RfDiff base config with null
+potentials:
+  generatedWithProsculpt: true # Leave this dummy here, otherwise it will overwrite default RfDiff base config with null
+contigmap:
+  inpaint_seq: [A1-20] # Without quotes! RfDiff expects contigs as lists, not as strings.

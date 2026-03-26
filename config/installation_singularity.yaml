@@ -1,0 +1,16 @@
+# This config includes installation paths and other constant values
+# Do not modify the {OUTPUT_PATH} tags. They are handled internally by prosculpt.
+
+rfdiff_run_command: >-
+  singularity run --nv
+  -B {OUTPUT_PATH}:/output
+  -B {OUTPUT_PATH}/schedules:/app/RFdiffusion/schedules
+  --writable-tmpfs /home/s2528436/prosculpt/rfdiff.sif
+
+mpnn_run_command: singularity exec --nv /home/s2528436/prosculpt/proteinmpnn.sif python /app/proteinmpnn/proteinmpnn_run.py
+
+colabfold_preparation_script: /home/s2528436/prosculpt/af2_preparation_script.sh
+colabfold_run_command: singularity run --nv /home/s2528436/prosculpt/colabfold.sif colabfold_batch
+
+pymol_python_path: singularity exec /home/s2528436/prosculpt/pymol.sif /usr/bin/python3.13
+prosculpt_python_path: /home/s2528436/prosculpt/prosculpt_venv/bin/python
