@@ -26,7 +26,7 @@ The easiest way to install prosculpt is using a container manager like [apptaine
 
 Begin by cloning prosculpt:
 ```bash
-git clone https://github.com/dirkjanotterspeer2001-glitch/AFCucDesign.git
+git clone https://github.com/dirkjanotterspeer2001-glitch/AFCycDesign.git
 cd prosculpt_afcycdesign
 ```
 Create a new environment called prosculpt (or any name of your choice) using python or any venv manager and activate it:
