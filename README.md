@@ -1,5 +1,5 @@
 # Prosculpt_AFCycDesign
-Protein design and sculpting using Rosetta and Deep learning methods (RFDiff and Alphafold2)
+Protein design and sculpting using Rosetta and Deep learning methods (RFDiff and AFCycDesign)
 
 ![image](pipeline_pic.png)
 ## Description 
