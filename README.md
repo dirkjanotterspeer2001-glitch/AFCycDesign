@@ -46,6 +46,7 @@ singularity pull rfdiff.sif docker://rosettacommons/rfdiffusion
 singularity pull proteinmpnn.sif docker://rosettacommons/proteinmpnn
 singularity pull colabfold.sif docker://unionbio/colabfold:w4KMVR7WrKDlCbdQ1BYrjQ-test
 singularity pull pymol.sif docker://jysgro/pymol:3.1.0_amd_arm
+singularity pull colabdesign_latest.sif docker://openzyme/colabdesign:latest
 ```
 Go into prosculpt/config/installation.yaml and replace the default values with the ones corresponding to your system. Mainly:
 - Replace the run command of the sif files with the appropriate commands and paths for your system.
