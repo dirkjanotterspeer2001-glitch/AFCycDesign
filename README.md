@@ -1,20 +1,23 @@
-# prosculpt
+# Prosculpt_AFCycDesign
 Protein design and sculpting using Rosetta and Deep learning methods (RFDiff and Alphafold2)
 
 ![image](pipeline_pic.png)
 ## Description 
-The script `rfdiff_mpnn_af2_merged.py` runs a pipeline to automate the processes of generating protein structures with RFdiffusion, sequence generation with ProteinMPNN, and folding and evaluation with AF2 and Rosetta. Specifically, the script uses motif scaffolding to generate structures (see [RFdiffusion github repository](https://github.com/RosettaCommons/RFdiffusion/blob/main/README.md)).
+The script `rfdiff_mpnn_af2_merged.py` runs a pipeline to automate the processes of generating protein structures with RFdiffusion, sequence generation with ProteinMPNN, structure generation from RFdiffusion and ProteinMPNN output by rosetta and finally the prediction and evaluation by AFCycDesign. Filtering is possible first by iPAE en RMSD and later by Rosetta metrics like sap-score, cms and ddg-interface.
+Specifically, the script uses motif scaffolding to generate structures (see [RFdiffusion github repository](https://github.com/RosettaCommons/RFdiffusion/blob/main/README.md)).
 
 The main steps are as follows:
 1. The main inputs are a protein PDB file and a yaml file that specifies how to generate the new structure around the original protein (which parts to keep, etc.). 
 2. The RFdiffusion module generates new protein structures (backbone atoms only) based on the options provided.
 4. Generated PDB files are preprocessed using helper scripts and ProteinMPNN generates sequences (aminoacid residues) for these structures.
-5. Sequences are prepared for the AF2, which folds them into structures.
-6. Additional evaluation parameters are calculated for these structures using a separate script with Rosetta.
-7. The final output is a CSV file containing AF2 structure path, evaluation parameters etc.
+5. Rosetta maps the ProteinMPNN generated sequences onto the RFDiffusion backbone to generate a structure.
+6. This structure serves as an input for AFCycDesign; AFCycDesign evaluates this structure and provides an updated structure in combination with metrics (iPAE and interface-RMSD) that predict binding.
+7. All peptides are preserved (even the bad performing ones) and a seperate folder is created that stores peptides that pass the thresshold values of the iPAE and the interface-RMSD. 
+8. Additional evaluation for these structures can be done using a separate script with Rosetta metrics, like sap-score, cms and ddg-interface. The peptide structures can be rankordered using these metrics.
+9. The final output is a CSV file of the passed peptides containing the AFCycDesign structure path and the Rosetta parameter values.
 
 ## Requirements  
-The script requires the prosculpt package. It assumes that RFdiffusion, proteinMPNN, and AF2 are installed and that the correct paths are provided in the `installation.yaml` config file. Additionall biopython, hydra-core, pandas and scipy and pyRosetta are required.  
+The script requires the prosculpt package. It assumes that RFdiffusion, proteinMPNN, and AFCyCDesign/ColabDesign are installed and that the correct paths are provided in the `installation.yaml` config file. Additionall biopython, hydra-core, pandas and scipy and pyRosetta are required.  
 
 For running tests, Python version must be >= 3.7 (it needs the `capture_output` arg).
 
@@ -23,8 +26,8 @@ The easiest way to install prosculpt is using a container manager like [apptaine
 
 Begin by cloning prosculpt:
 ```bash
-git clone https://github.com/ajasja/prosculpt.git
-cd prosculpt
+git clone https://github.com/dirkjanotterspeer2001-glitch/AFCucDesign.git
+cd prosculpt_afcycdesign
 ```
 Create a new environment called prosculpt (or any name of your choice) using python or any venv manager and activate it:
 ```bash
