@@ -1,22 +1,22 @@
-task_name: KIT_2EC8_test
+task_name: KIT_cluster_02_run_01
 
 slurm:
   #These are just here as an example of job-specific slurm options, but they are also the defaults set in installation.yaml
   #Do not specify the --array command here. Use the num_tasks parameter below.
   output: slurm-%A_%a_%x.out
   error: slurm-%A_%a_%x.err
-  time: "04:00:00"
+  time: "7-00:00:00"
 
 num_tasks: 1
 
 
 # Config for the current run
-pdb_path: Examples/input_data/2EC8.pdb # Path to input PDB file || null when building unconditionally
-output_dir: Examples/Examples_out/2EC8_test/ # Path to output directory
+pdb_path: Examples/MD/KIT/cluster_02_KIT_without_water.pdb # Path to input PDB file || null when building unconditionally
+output_dir: Examples/Examples_out/MD/KIT/cluster_02/run_01/ # Path to output directory
 chains_to_design: null
-contig: "[10-25]" # Contig to design
-num_designs_rfdiff: 2 # Number of designs to generate with RFdiffusion
-num_seq_per_target_mpnn: 2 # Number of sequences to generate per target with MPNN
+contig: "[10-20]" # Contig to design
+num_designs_rfdiff: 2500 # Number of designs to generate with RFdiffusion
+num_seq_per_target_mpnn: 4 # Number of sequences to generate per target with MPNN
 afcycdesign_mpnn_cycles: 1
 chain_break_cutoff_A: 2 # Chain break cutoff in angstroms (default: 2)
 
@@ -24,7 +24,7 @@ sampling_temp: 0.15 # ProteinMPNN parameter
 backbone_noise: 0 # ProteinMPNN parameter
 
 skipRfDiff: False
-use_rosetta_filtering: True
+use_rosetta_filtering: False
 
 modules:
   - ALICE/default

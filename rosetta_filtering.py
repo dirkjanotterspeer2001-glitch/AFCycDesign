@@ -1,231 +1,284 @@
-#!/usr/bin/env python3
-from __future__ import annotations
-
 import argparse
-import json
-from pathlib import Path
-from typing import Dict, Any, List
-
-import pandas as pd
-
+import os
+import sys
+import glob
+import traceback
+import csv
+ 
 import pyrosetta
 from pyrosetta import rosetta
+ 
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+ 
+ 
+XML_TEMPLATE = r"""
+<ROSETTASCRIPTS>
+  <SCOREFXNS>
+    <ScoreFunction name="sfxn" weights="beta_nov16">
+      <Reweight scoretype="coordinate_constraint" weight="1" />
+      <Reweight scoretype="atom_pair_constraint" weight="1" />
+      <Reweight scoretype="dihedral_constraint" weight="1" />
+      <Reweight scoretype="angle_constraint" weight="1" />
+    </ScoreFunction>
+ 
+    <ScoreFunction name="sfxn_cart" weights="beta_nov16_cart">
+      <Reweight scoretype="coordinate_constraint" weight="1" />
+      <Reweight scoretype="atom_pair_constraint" weight="1" />
+      <Reweight scoretype="dihedral_constraint" weight="1" />
+      <Reweight scoretype="angle_constraint" weight="1" />
+    </ScoreFunction>
+  </SCOREFXNS>
+ 
+  <RESIDUE_SELECTORS>
+    <Chain name="chainA" chains="{PROTEIN_CHAIN}"/>
+    <Chain name="chainB" chains="{PEPTIDE_CHAIN}"/>
+ 
+    <Neighborhood name="interface_chA" selector="chainB" distance="14.0" />
+    <Neighborhood name="interface_chB" selector="chainA" distance="14.0" />
+    <And name="AB_interface" selectors="interface_chA,interface_chB" />
+    <Not name="Not_interface" selector="AB_interface" />
+  </RESIDUE_SELECTORS>
+ 
+  <TASKOPERATIONS>
+    <ProteinInterfaceDesign name="pack_long"
+      design_chain1="0"
+      design_chain2="0"
+      jump="1"
+      interface_distance_cutoff="15"/>
+    <OperateOnResidueSubset name="restrict_to_interface" selector="Not_interface">
+      <PreventRepackingRLT/>
+    </OperateOnResidueSubset>
+  </TASKOPERATIONS>
+ 
+  <MOVERS>
+    <PeptideCyclizeMover name="pcm" residue_selector="chainB"/>
+ 
+    <TaskAwareMinMover name="minimize_interface"
+      scorefxn="sfxn_cart"
+      tolerance="0.01"
+      cartesian="true"
+      task_operations="restrict_to_interface"
+      jump="0" />
+ 
+    <TaskAwareMinMover name="min"
+      scorefxn="sfxn"
+      bb="0"
+      chi="1"
+      task_operations="pack_long" />
+  </MOVERS>
+ 
+  <FILTERS>
+    <Ddg name="ddg"
+      threshold="50"
+      jump="1"
+      repeats="5"
+      repack="1"
+      relax_mover="min"
+      confidence="0"
+      scorefxn="sfxn"
+      extreme_value_removal="1" />
+ 
+    <ContactMolecularSurface name="contact_molecular_surface"
+      distance_weight="0.5"
+      target_selector="chainA"
+      binder_selector="chainB"
+      confidence="0" />
+  </FILTERS>
+ 
+  <SIMPLE_METRICS>
+    <SapScoreMetric name="sap_score" score_selector="chainB" />
+  </SIMPLE_METRICS>
+ 
+  <PROTOCOLS>
+    <Add mover="pcm" />
+    <Add mover="minimize_interface" />
+    <Add mover="pcm" />
+    <Add filter="ddg" />
+    <Add metrics="sap_score" />
+    <Add filter="contact_molecular_surface" />
+  </PROTOCOLS>
+</ROSETTASCRIPTS>
+"""
 
 
-def cyclize_chain_head_to_tail(pose: rosetta.core.pose.Pose, chain_letter: str = "B") -> None:
-    """Head-to-tail cyclize chain_letter: connect last residue C to first residue N."""
-    chain_sel = rosetta.core.select.residue_selector.ChainSelector(chain_letter)
-    subset = chain_sel.apply(pose)
-    idxs = [i for i in range(1, pose.total_residue() + 1) if subset[i]]
-    if len(idxs) < 2:
-        raise ValueError(f"Chain {chain_letter} has <2 residues; cannot cyclize.")
-
-    first_i, last_i = idxs[0], idxs[-1]
-
-    # Remove terminus variants so Rosetta can make a polymer bond
-    rosetta.core.pose.remove_lower_terminus_type_from_pose_residue(pose, first_i)
-    rosetta.core.pose.remove_upper_terminus_type_from_pose_residue(pose, last_i)
-
-    # Declare C(last) - N(first) chemical bond
-    pose.conformation().declare_chemical_bond(last_i, "C", first_i, "N")
+def peptide_from_filename(pdb_path: str) -> str:
+    base = os.path.splitext(os.path.basename(pdb_path))[0]
+    # common naming: <peptide>_on_monomer_..._prediction
+    if "_on_" in base:
+        return base.split("_on_")[0]
+    if base.endswith("_prediction"):
+        return base[:-11]
+    return base
 
 
-def make_interface_selectors(chainA: str = "A", chainB: str = "B", dist: float = 14.0):
-    """interface = (B within dist of A) OR (A within dist of B)."""
-    target = rosetta.core.select.residue_selector.ChainSelector(chainA)
-    binder = rosetta.core.select.residue_selector.ChainSelector(chainB)
-
-    near_target = rosetta.core.select.residue_selector.NeighborhoodResidueSelector()
-    near_target.set_focus_selector(target)
-    near_target.set_distance(dist)
-    near_target.set_include_focus_in_subset(False)
-
-    near_binder = rosetta.core.select.residue_selector.NeighborhoodResidueSelector()
-    near_binder.set_focus_selector(binder)
-    near_binder.set_distance(dist)
-    near_binder.set_include_focus_in_subset(False)
-
-    binder_iface = rosetta.core.select.residue_selector.AndResidueSelector(binder, near_target)
-    target_iface = rosetta.core.select.residue_selector.AndResidueSelector(target, near_binder)
-    interface = rosetta.core.select.residue_selector.OrResidueSelector(binder_iface, target_iface)
-
-    return interface, binder, target
-
-
-def minimize_interface_cartesian(
-    pose: rosetta.core.pose.Pose,
-    interface_selector,
-    scorefxn_cart,
-    tol: float = 0.01,
-    allow_jump: bool = True,
-) -> None:
-    """Cartesian minimize chi for interface residues; optionally allow RB jumps."""
-    subset = interface_selector.apply(pose)
-
-    movemap = rosetta.core.kinematics.MoveMap()
-    movemap.set_bb(False)
-    movemap.set_chi(False)
-    if allow_jump:
-        for j in range(1, pose.num_jump() + 1):
-            movemap.set_jump(j, True)
-
+def detect_protein_and_peptide_chain_ids(pose):
+    """
+    Heuristic: peptide = shortest polymer chain; protein = longest polymer chain.
+    Returns (protein_chain_id, peptide_chain_id).
+    """
+    pdbi = pose.pdb_info()
+    chain_map = {}
     for i in range(1, pose.total_residue() + 1):
-        if subset[i]:
-            movemap.set_chi(i, True)
+        ch = pdbi.chain(i)
+        chain_map.setdefault(ch, []).append(i)
 
-    minm = rosetta.protocols.minimization_packing.MinMover()
-    minm.movemap(movemap)
-    minm.score_function(scorefxn_cart)
-    minm.cartesian(True)
-    minm.min_type("lbfgs_armijo_nonmonotone")
-    minm.tolerance(tol)
-    minm.apply(pose)
+    chain_poly_lengths = []
+    for ch, idxs in chain_map.items():
+        poly = [i for i in idxs if pose.residue(i).is_polymer()]
+        if poly:
+            chain_poly_lengths.append((ch, len(poly)))
 
+    if len(chain_poly_lengths) < 2:
+        raise RuntimeError("Could not detect >=2 polymer chains (need protein+peptide).")
 
-def compute_ddg_interface_analyzer(
-    pose: rosetta.core.pose.Pose, scorefxn, interface_str: str = "A_B"
-) -> float:
-    """
-    Uses InterfaceAnalyzerMover; get_interface_dG() corresponds to Rosetta's interface ΔG estimate.
-    """
-    iam = rosetta.protocols.analysis.InterfaceAnalyzerMover(interface_str, False, scorefxn)
-    iam.set_pack_input(True)
-    iam.set_pack_separated(True)
-    iam.set_compute_interface_energy(True)
-    iam.set_calc_dSASA(True)
-    iam.apply(pose)
-    return float(iam.get_interface_dG())
+    chain_poly_lengths.sort(key=lambda x: x[1])
+    peptide_chain = chain_poly_lengths[0][0]
+    protein_chain = chain_poly_lengths[-1][0]
+    return protein_chain, peptide_chain
 
 
-def compute_sap_metric(pose: rosetta.core.pose.Pose, binder_selector) -> float:
-    """
-    SapScoreMetric location can vary slightly by build; this works for many full PyRosetta builds.
-    """
-    sap = rosetta.core.simple_metrics.per_residue_metrics.SapScoreMetric()
-    sap.set_score_selector(binder_selector)
-    return float(sap.calculate(pose))
+def write_csv(rows, csv_path, fieldnames):
+    with open(csv_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
 
 
-def compute_cms(pose: rosetta.core.pose.Pose, target_selector, binder_selector, distance_weight: float = 0.5) -> float:
-    cms = rosetta.protocols.simple_filters.ContactMolecularSurfaceFilter()
-    cms.distance_weight(distance_weight)
-    cms.target_selector(target_selector)
-    cms.binder_selector(binder_selector)
-    return float(cms.report_sm(pose))
+def write_xlsx(rows, xlsx_path, fieldnames, sheet_name="results"):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
 
+    # header
+    header_font = Font(bold=True)
+    ws.append(fieldnames)
+    for j in range(1, len(fieldnames) + 1):
+        ws.cell(row=1, column=j).font = header_font
+    ws.freeze_panes = "A2"
 
-def analyze_one_pdb(
-    pdb_path: Path,
-    chainA: str,
-    chainB: str,
-    iface_dist: float,
-    sfxn,
-    sfxn_cart,
-    allow_jump: bool,
-) -> Dict[str, Any]:
-    out: Dict[str, Any] = {
-        "pdb": str(pdb_path),
-        "ddg_rosetta": None,
-        "sap_macrocycle": None,
-        "cms": None,
-        "status": "ok",
-        "error": "",
-    }
+    # rows
+    for r in rows:
+        ws.append([r.get(k, "") for k in fieldnames])
 
-    try:
-        pose = rosetta.core.import_pose.pose_from_file(str(pdb_path))
+    # reasonable column widths
+    for j, key in enumerate(fieldnames, start=1):
+        max_len = len(key)
+        for i in range(2, ws.max_row + 1):
+            v = ws.cell(row=i, column=j).value
+            if v is None:
+                continue
+            max_len = max(max_len, len(str(v)))
+        ws.column_dimensions[get_column_letter(j)].width = min(max_len + 2, 60)
 
-        # 1) Cyclize macrocycle chain
-        cyclize_chain_head_to_tail(pose, chainB)
-
-        # 2) Interface selector
-        interface_sel, binder_sel, target_sel = make_interface_selectors(chainA, chainB, iface_dist)
-
-        # 3) Minimize interface
-        minimize_interface_cartesian(pose, interface_sel, sfxn_cart, tol=0.01, allow_jump=allow_jump)
-
-        # 4) Metrics
-        out["ddg_rosetta"] = compute_ddg_interface_analyzer(pose, sfxn, interface_str=f"{chainA}_{chainB}")
-
-        # SAP / CMS (may fail if build lacks bindings; keep ddG anyway)
-        try:
-            out["sap_macrocycle"] = compute_sap_metric(pose, binder_sel)
-        except Exception as e:
-            out["sap_macrocycle"] = None
-            out["status"] = "partial"
-            out["error"] += f"SAP_failed: {e}; "
-
-        try:
-            out["cms"] = compute_cms(pose, target_sel, binder_sel, distance_weight=0.5)
-        except Exception as e:
-            out["cms"] = None
-            out["status"] = "partial"
-            out["error"] += f"CMS_failed: {e}; "
-
-    except Exception as e:
-        out["status"] = "failed"
-        out["error"] = str(e)
-
-    return out
+    wb.save(xlsx_path)
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--in_dir", required=True, type=Path, help="Folder with peptide complex PDBs")
-    ap.add_argument("--out_prefix", required=True, type=Path, help="Output prefix (no extension)")
-    ap.add_argument("--chainA", default="A")
-    ap.add_argument("--chainB", default="B")
-    ap.add_argument("--iface_dist", type=float, default=14.0)
-    ap.add_argument("--allow_jump", action="store_true", help="Allow rigid-body minimization between chains")
-    ap.add_argument("--extra_flags", default="", help='Extra PyRosetta init flags, e.g. "-extra_res_fa X.params"')
+    ap = argparse.ArgumentParser(description="Run RosettaScripts over a folder; output PDBs + CSV + XLSX.")
+    ap.add_argument("--input_dir", required=True, help="Folder with input PDB complexes")
+    ap.add_argument("--output_dir", required=True, help="Folder for output PDBs")
+    ap.add_argument("--csv", default="results.csv", help="Output CSV path")
+    ap.add_argument("--xlsx", default="results.xlsx", help="Output XLSX path")
+    ap.add_argument("--pattern", default="*.pdb", help="Glob pattern inside input_dir (default: *.pdb)")
+    ap.add_argument("--mute", action="store_true", help="Mute Rosetta output")
     args = ap.parse_args()
 
-    # Init once for the whole batch
-    flags = f"-mute all {args.extra_flags}".strip()
-    pyrosetta.init(flags)
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # Scorefunctions
-    sfxn = rosetta.core.scoring.ScoreFunctionFactory.create_score_function("beta_nov16")
-    sfxn_cart = rosetta.core.scoring.ScoreFunctionFactory.create_score_function("beta_nov16_cart")
+    init_opts = " -corrections:beta_nov16 true "
+    if args.mute:
+        init_opts = " -mute all " + init_opts
+    pyrosetta.init(init_opts)
 
-    # Mirror your constraint reweights (safe even if no constraints are present)
-    for st in ("coordinate_constraint", "atom_pair_constraint", "dihedral_constraint", "angle_constraint"):
-        sfxn_cart.set_weight(getattr(rosetta.core.scoring, st), 1.0)
-
-    pdbs = sorted(args.in_dir.glob("*.pdb"))
+    pdbs = sorted(glob.glob(os.path.join(args.input_dir, args.pattern)))
     if not pdbs:
-        raise SystemExit(f"No .pdb files found in {args.in_dir}")
+        print(f"ERROR: no files matched {args.pattern} in {args.input_dir}", file=sys.stderr)
+        sys.exit(1)
 
-    rows: List[Dict[str, Any]] = []
+    rows = []
+    fieldnames = [
+        "peptide",
+        "input_pdb",
+        "output_pdb",
+        "protein_chain",
+        "peptide_chain",
+        "ddg",
+        "contact_molecular_surface",
+        "sap_score",
+        "status",
+        "error",
+    ]
+
     for pdb in pdbs:
-        rows.append(
-            analyze_one_pdb(
-                pdb,
-                chainA=args.chainA,
-                chainB=args.chainB,
-                iface_dist=args.iface_dist,
-                sfxn=sfxn,
-                sfxn_cart=sfxn_cart,
-                allow_jump=args.allow_jump,
-            )
-        )
+        name = os.path.basename(pdb)
+        pep = peptide_from_filename(pdb)
+        out_pdb = os.path.join(args.output_dir, name)
 
-    df = pd.DataFrame(rows)
+        print(f"Processing {name} ...", file=sys.stderr)
 
-    # Write CSV + XLSX
-    csv_path = args.out_prefix.with_suffix(".csv")
-    xlsx_path = args.out_prefix.with_suffix(".xlsx")
-    df.to_csv(csv_path, index=False)
-    df.to_excel(xlsx_path, index=False)
+        row = {
+            "peptide": pep,
+            "input_pdb": name,
+            "output_pdb": os.path.basename(out_pdb),
+            "protein_chain": "",
+            "peptide_chain": "",
+            "ddg": "",
+            "contact_molecular_surface": "",
+            "sap_score": "",
+            "status": "FAIL",
+            "error": "",
+        }
 
-    # Also write a small summary JSON
-    summary = {
-        "n_total": int(len(df)),
-        "n_ok": int((df["status"] == "ok").sum()),
-        "n_partial": int((df["status"] == "partial").sum()),
-        "n_failed": int((df["status"] == "failed").sum()),
-    }
-    args.out_prefix.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+        try:
+            pose = rosetta.core.import_pose.pose_from_file(pdb)
+
+            protein_chain, peptide_chain = detect_protein_and_peptide_chain_ids(pose)
+            row["protein_chain"] = protein_chain
+            row["peptide_chain"] = peptide_chain
+
+            xml = XML_TEMPLATE.format(PROTEIN_CHAIN=protein_chain, PEPTIDE_CHAIN=peptide_chain)
+            xml_objs = rosetta.protocols.rosetta_scripts.XmlObjects.create_from_string(xml)
+
+            protocol = xml_objs.get_mover("ParsedProtocol")
+            ddg_filter = xml_objs.get_filter("ddg")
+            cms_filter = xml_objs.get_filter("contact_molecular_surface")
+            sap_metric = xml_objs.get_simple_metric("sap_score")
+
+            protocol.apply(pose)
+
+            # Write clean PDB (no metric text appended)
+            pose.dump_pdb(out_pdb)
+
+            ddg_val = ddg_filter.report_sm(pose)
+            cms_val = cms_filter.report_sm(pose)
+            sap_val = sap_metric.calculate(pose)
+
+            row["ddg"] = f"{ddg_val:.6f}"
+            row["contact_molecular_surface"] = f"{cms_val:.6f}"
+            row["sap_score"] = f"{sap_val:.6f}"
+            row["status"] = "OK"
+            row["error"] = ""
+
+        except Exception as e:
+            row["error"] = str(e)
+            # keep going, but record failure
+            print(f"FAILED on {name}: {e}", file=sys.stderr)
+            # If you want the full stack trace:
+            traceback.print_exc(file=sys.stderr)
+
+        rows.append(row)
+
+    # Write tables (all peptides, including FAIL)
+    write_csv(rows, args.csv, fieldnames)
+    write_xlsx(rows, args.xlsx, fieldnames)
+
+    print("Done.", file=sys.stderr)
+    print(f"Output PDBs: {args.output_dir}", file=sys.stderr)
+    print(f"Results CSV: {args.csv}", file=sys.stderr)
+    print(f"Results XLSX: {args.xlsx}", file=sys.stderr)
 
 
 if __name__ == "__main__":

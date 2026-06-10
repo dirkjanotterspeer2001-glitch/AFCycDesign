@@ -4,8 +4,8 @@ rfdiff_run_command: /home/s2528436/miniconda3/envs/RFgpu/bin/python /home/s25284
 mpnn_run_command: /home/s2528436/miniconda3/envs/mlfold/bin/python /home/s2528436/ProteinMPNN/protein_mpnn_run.py
 
 
-rosetta_filtering_command: /home/s2528436/prosculpt_afcycdesign/rosetta_filtering.py
-# rosetta_env: /home/s2528436/miniconda3/envs/pyrosetta/bin/python
+# rosetta_filtering_command: /home/s2528436/prosculpt_afcycdesign/rosetta_filtering.py
+rosetta_filtering_command: /home/s2528436/scripts/rosetta_filtering.py
 rosetta_env: /home/s2528436/pyrosetta_env/bin/python
 
 
@@ -21,9 +21,9 @@ prosculpt_python_path: /home/s2528436/prosculpt_afcycdesign/bin/python
 slurm:
   #General slurm parameters that apply to every job (they can be overwritten by individual jobs)
   #Do not specify the --array command here. Use the num_tasks parameter in the job yaml file.
-  # partition: gpu-2080ti-11g
+  partition: gpu-2080ti-11g
   # partition: gpu-short
-  partition: gpu-l4-24g
+  # partition: gpu-l4-24g
   # partition: gpu-a100-80g
   gres: gpu:1
   cpus-per-task: 2

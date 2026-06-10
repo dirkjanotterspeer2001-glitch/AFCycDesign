@@ -492,56 +492,67 @@ def run_afcycdesign(cfg):
     log.info("Out_dir: %s", out_dir)
     log.info("Peptides dir: %s", peptides_dir)
     log.info("Peptides: %s", peptides)
-    if len(list(pathlib.Path(out_dir).glob("*.pdb"))) != len(list(pathlib.Path(peptides_dir).glob("*.pdb"))):
-        for pep in peptides:
-            log.info(f"Running peptide: {pep}")
-            cmd = [
-                "singularity", "exec", "--nv",
-                "--bind", f"{os.path.expanduser('~')}:{os.path.expanduser('~')}",
-                afcycdesign_sif,
-                "python3",
-                afcycdesign_script,
-                "binder",
-                "--data_dir", params_dir,
-                "--target", target_pdb,
-                "--peptides_dir", peptides_dir,
-                "--outdir", out_dir,
-                "--cyclic",
-                "--offset_type", "2",
-                "--idle_sec", "60",
-                "--score", os.path.join(out_dir, "score.csv"),
-                "--single_peptide", pep,
-            ]
-            env = os.environ.copy()
-            env["TMPDIR"] = os.path.join(out_dir, "temp")
-            env["TEMP"] = env["TMPDIR"]
-            env["TMP"] = env["TMPDIR"]
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=out_dir,
-                env=env,
+    out_path = pathlib.Path(out_dir)
+    temp_dir = out_path / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    for pep in peptides:
+        pep_path = pathlib.Path(pep)
+        pep_name = pep_path.stem
+        existing_outputs = list(out_path.glob(f"{pep_name}*.pdb"))
+        if existing_outputs:
+            log.info(
+                "Skipping peptide %s, output exists: %s",
+                pep_name,
+                existing_outputs[0].name,
             )
+            continue
+        log.info(f"Running peptide: {pep}")
+        cmd = [
+            "singularity", "exec", "--nv",
+            "--bind", f"{os.path.expanduser('~')}:{os.path.expanduser('~')}",
+            afcycdesign_sif,
+            "python3",
+            afcycdesign_script,
+            "binder",
+            "--data_dir", params_dir,
+            "--target", target_pdb,
+            "--peptides_dir", peptides_dir,
+            "--outdir", out_dir,
+            "--cyclic",
+            "--offset_type", "2",
+            "--idle_sec", "60",
+            "--score", os.path.join(out_dir, "score.csv"),
+            "--single_peptide", pep,
+        ]
+        env = os.environ.copy()
+        env["TMPDIR"] = os.path.join(out_dir, "temp")
+        env["TEMP"] = env["TMPDIR"]
+        env["TMP"] = env["TMPDIR"]
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=out_dir,
+            env=env,
+        )
 
-            if result.stdout:
-                log.info(result.stdout)
+        if result.stdout:
+            log.info(result.stdout)
 
-            if result.stderr:
-                log.error(result.stderr)
+        if result.stderr:
+            log.error(result.stderr)
 
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"AFcycDesign failed with exit code {result.returncode}"
-                )
-    else:
-        log.info("Skip AFCycDesign")
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"AFcycDesign failed for {pep_name} with exit code {result.returncode}"
+            )
     log.info("AFCycDesign Finished")
 
 
-def do_filtering(cfg, chain_A, chain_B):
-    in_dir = cfg.afcycdesign_result_dir
+def do_filtering(cfg):
+    passed_dir = os.path.join(cfg.afcycdesign_result_dir, "Passed")
+    in_dir = passed_dir
     log.info(f"Inputmap from afcycdesign: {in_dir}")
     out_dir = os.path.join(cfg.afcycdesign_out_dir, "rosetta_filtered")
     os.makedirs(out_dir, exist_ok=True)
@@ -550,11 +561,8 @@ def do_filtering(cfg, chain_A, chain_B):
     cmd = [
         cfg.rosetta_env,
         cfg.rosetta_filtering_command,
-        "--in_dir", in_dir,
-        "--out_prefix", out_prefix,
-        "--chainA", chain_A,
-        "--chainB", chain_B,
-        "--extra_flags", "-corrections::beta_nov16 true",
+        "--input_dir", in_dir,
+        "--output_dir", out_prefix,
     ]
 
     log.info(f"[RUNNING] {' '.join(cmd)}")
@@ -642,10 +650,10 @@ def prosculptApp(cfg: DictConfig) -> None:
 
     dtimelog("do_cycling")
     do_cycling(cfg)
-    dtimelog("process_afcycdesign.process")
     run_afcycdesign(cfg)
+    dtimelog("process_afcycdesign.process")
     if cfg.get("use_rosetta_filtering", False):
-        do_filtering(cfg, "A", "B")
+        do_filtering(cfg)
         dtimelog("do_rosetta_filtering")
     dtimelog("Finished", True)
 
