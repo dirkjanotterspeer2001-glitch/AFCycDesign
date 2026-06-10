@@ -1,7 +1,7 @@
 # Prosculpt_AFCycDesign
 Protein design and sculpting using Rosetta and Deep learning methods (RFDiff and AFCycDesign)
 
-![image](pipeline_pic.png)
+![image]()
 ## Description 
 The script `rfdiff_mpnn_af2_merged.py` runs a pipeline to automate the processes of generating protein structures with RFdiffusion, sequence generation with ProteinMPNN, structure generation from RFdiffusion and ProteinMPNN output by rosetta and finally the prediction and evaluation by AFCycDesign. Filtering is possible first by iPAE en RMSD and later by Rosetta metrics like sap-score, cms and ddg-interface.
 Specifically, the script uses motif scaffolding to generate structures (see [RFdiffusion github repository](https://github.com/RosettaCommons/RFdiffusion/blob/main/README.md)).
